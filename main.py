@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 
+import pandas as pd
 from datasets import Dataset
 from transformers import AutoTokenizer
 
@@ -20,29 +21,46 @@ def get_ctr_section(ctrid, section):
 	with open(ctr_path) as json_file:
 		ctr = json.load(json_file)
 	ctr_section_text = "".join(ctr[section])
-	return ctr_section_text
+	return ctr[section]
 
 
-def add_ctr_text_and_normalize_data(data, type="train"):
+def add_ctr_text_and_normalize_data(data, type="train", count = None):
 	res_data = []
+	tokenizer = AutoTokenizer.from_pretrained(constants.MODEl_CHECKPOINT, use_fast=True)
+	sep_token = tokenizer.sep_token
 	for id in data:
-		ctr_text = "<PRIMARY> "
+		ctr_text = "[PRIMARY] "
 		sample = data[id]
 		section = sample["Section_id"]
 		if "Primary_id" in sample:
 			primary_ctr_id = sample["Primary_id"]
-			ctr_text += get_ctr_section(primary_ctr_id, section)
+			ctr_section_data = get_ctr_section(primary_ctr_id, section)
+			if isinstance(ctr_section_data, list):
+				ctr_text += " {} ".format(sep_token).join(ctr_section_data)
+				if type != "test":
+					sample["Primary_evidence_text"] = [ctr_section_data[i] for i in sample["Primary_evidence_index"]]
+		# ctr_text += get_ctr_section(primary_ctr_id, section)
 		if "Secondary_id" in sample:
 			secondary_ctr_id = sample["Secondary_id"]
-			ctr_text += " <SECONDARY> " + get_ctr_section(secondary_ctr_id, section)
+			ctr_section_data = get_ctr_section(secondary_ctr_id, section)
+			ctr_text += " [SECONDARY] "
+			if isinstance(ctr_section_data, list):
+				ctr_text += " {} ".format(sep_token).join(ctr_section_data)
+				if type != "test":
+					sample["Secondary_evidence_text"] = [ctr_section_data[i] for i in
+														 sample["Secondary_evidence_index"]]
+		# ctr_text += " <SECONDARY> " + get_ctr_section(secondary_ctr_id, section)
 		else:
 			sample["Secondary_evidence_index"] = []
+			sample["Secondary_evidence_text"] = []
 			sample["Secondary_id"] = "N/A"
 		sample["Premise"] = ctr_text
 		if type != "test":
 			sample["label"] = sample.get("Label")
 		sample["sample_id"] = id
 		res_data.append(sample)
+		if count is not None and len(res_data) >= count:
+			break
 	return res_data
 
 
@@ -78,19 +96,30 @@ def parse_args():
 		   args.freeze_layers, args.learning_rate
 
 
-def prepare_data_for_dual_encoder_model(data):
+def prepare_data_for_dual_encoder_model(data, type="train"):
 	de_data = []
-	id2label = {0: "Contradiction", 1: "Entailment"}
+	id2label = {"Contradiction": 0, "Entailment": 1}
 	for sample in data:
 		sample_data = []
 		sample_data.append(sample["sample_id"])
 		sample_data.append(sample["sample_id"])
-		sample_data.append(sample["Statement"])
-		sample_data.append(sample["Premise"])
-		sample_data.append(sample["label"])
-		sample_data.append()
+		statement = sample["Statement"]
+		sample_data.append(statement)
+		premise = sample["Premise"]
+		sample_data.append(premise)
+		if type != "test":
+			sample_data.append(id2label[sample["label"]])
+			sample_data.append(" | ".join(sample["Primary_evidence_text"] + sample["Secondary_evidence_text"]))
+		de_data.append(sample_data)
+	return de_data
 
 
+def write_list_to_df(res, filename):
+	columns = ["sp_id", "rp_id", "seeker_post", "response_post"]
+	if filename != "test_de.csv":
+		columns = ["sp_id", "rp_id", "seeker_post", "response_post", "level", "rationales"]
+	df = pd.DataFrame(res, columns=columns)
+	df.to_csv(filename, index=False)
 
 
 if __name__ == "__main__":
@@ -113,7 +142,17 @@ if __name__ == "__main__":
 	normalized_dev_data = add_ctr_text_and_normalize_data(dev_data)
 	normalized_test_data = add_ctr_text_and_normalize_data(test_data, type="test")
 
+	# train_de_data = prepare_data_for_dual_encoder_model(normalized_train_data)
+	# dev_de_data = prepare_data_for_dual_encoder_model(normalized_dev_data)
+	# test_te_data = prepare_data_for_dual_encoder_model(normalized_test_data, type="test")
+	# write_list_to_df(train_de_data, "train_de.csv")
+	# write_list_to_df(dev_de_data, "dev_de.csv")
+	# write_list_to_df(test_te_data, "test_de.csv")
+	# exit()
+
 	tokenizer = AutoTokenizer.from_pretrained(constants.MODEl_CHECKPOINT, use_fast=True)
+	special_tokens_dict = {'additional_special_tokens': ["[PRIMARY]", "[SECONDARY"]}
+	num_added_toks = tokenizer.add_special_tokens(special_tokens_dict)
 
 	train_dataset = Dataset.from_list(normalized_train_data)
 	train_dataset = train_dataset.class_encode_column("label")
@@ -121,23 +160,29 @@ if __name__ == "__main__":
 	dev_dataset = dev_dataset.class_encode_column("label")
 	actual_test_dataset = Dataset.from_list(normalized_test_data)
 	encoded_actual_test_dataset = nli_train.preprocess_data(actual_test_dataset, tokenizer)
-
 	dataset = train_dataset.train_test_split(test_size=0.2, shuffle=True, seed=42)
 	dataset["dev"] = dataset["test"]
 	dataset["test"] = dev_dataset
 	print(dataset)
 
 	encoded_dataset = nli_train.preprocess_data(dataset, tokenizer)
+	# print(len(encoded_dataset["train"]))
+	# tokenized_datasets = encoded_dataset["train"].filter(
+	# 	lambda example: len(example['input_ids']) <= len(example["Premise"].split(" ") + example["Statement"].split(" ")))
+	# print(len(tokenized_datasets))
+	# print(len(tokenized_datasets)[])
+
 	trainer = nli_train.train(encoded_dataset, tokenizer, epochs=epoch_num, batch_size=batch_size, lr=learning_rate)
 
 	trainer.train()
 	trainer.evaluate()
 	predictions = trainer.predict(encoded_dataset["test"])
-	# print(predictions)
+	print(predictions.metrics)
 	predictions = trainer.predict(encoded_actual_test_dataset)
 	predicted = predictions.predictions.argmax(axis=1)
 	print(predicted[:10])
 	print(predicted.shape)
+	print(predictions.metrics)
 	id2label = {0: "Contradiction", 1: "Entailment"}
 	predicted_class = [id2label[x] for x in predicted]
 	# print(predicted_class)
