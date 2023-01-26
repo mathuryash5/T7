@@ -57,8 +57,8 @@ def train(encoded_dataset, tokenizer, epochs=1, batch_size=8, lr=2e-5):
 	args = TrainingArguments(
 		f"{model_name}-finetuned-{TASK}",
 		evaluation_strategy="steps",
-		eval_steps=850,
-		save_steps=850,
+		eval_steps=100,
+		save_steps=100,
 		save_strategy="steps",
 		learning_rate=lr,
 		per_device_train_batch_size=batch_size,

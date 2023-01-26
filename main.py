@@ -8,7 +8,7 @@ from transformers import AutoTokenizer
 
 import constants
 import nli_train
-
+import torch
 
 def read_json(filename):
 	with open(filename) as json_file:
@@ -176,6 +176,13 @@ if __name__ == "__main__":
 
 	trainer.train()
 	trainer.evaluate()
+
+	for batch in trainer.get_eval_dataloader():
+		break
+	batch = {k: v.to(trainer.args.device) for k, v in batch.items()}
+	with torch.no_grad():
+		output = trainer.model(**batch)
+	print(output.keys())
 	predictions = trainer.predict(encoded_dataset["test"])
 	print(predictions.metrics)
 	predictions = trainer.predict(encoded_actual_test_dataset)
