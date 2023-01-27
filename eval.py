@@ -284,7 +284,7 @@ if __name__ == "__main__":
 	sampleids = []
 	for sample in encoded_actual_test_dataset:
 		sampleids.append(sample["sample_id"])
-	
+	sampleids = [id for id in pred.keys()]
 	res_dict = dict()
 	for sampleid, pred in zip(sampleids, new_predicted_class):
 		res_dict[sampleid] = {"Prediction": pred}
