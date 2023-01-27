@@ -15,5 +15,5 @@ CTR_DIR_PATH = os.path.join(ROOT_DIR, CTR_DIR)
 
 ### MODEL
 
-MODEl_CHECKPOINT = "bert-base-cased"
+MODEl_CHECKPOINT = "roberta-base"
 TASK = "NLI"
