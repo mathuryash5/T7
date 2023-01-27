@@ -291,5 +291,5 @@ if __name__ == "__main__":
 	
 	print(res_dict)
 	
-	with open("predictions_{}.txt".format(file_name.split(".")[0]), "w+") as f:
+	with open("predictions_{}.json".format(file_name.split(".")[0]), "w+") as f:
 		json.dump(res_dict, f)
